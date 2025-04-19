@@ -1,17 +1,835 @@
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <link rel="stylesheet" href="styles.css">
-  <title>Vanilla JavaScript App</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Microsoft Connections</title>
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://unpkg.com/lucide-static@latest/font/Lucide.css">
+    <style>
+        /* Add custom styles if needed, but prefer Tailwind */
+        body {
+            font-family: 'Inter', sans-serif; /* Default font */
+            overscroll-behavior: none; /* Prevent pull-to-refresh */
+        }
+
+        /* Difficulty Colors */
+        .bg-difficulty-yellow { background-color: #F9DF6D; color: #333; }
+        .bg-difficulty-green { background-color: #A0C35A; color: white; }
+        .bg-difficulty-blue { background-color: #4AADEE; color: white; }
+        .bg-difficulty-purple { background-color: #A16AE8; color: white; }
+
+        .border-difficulty-yellow { border-color: #F9DF6D; }
+        .border-difficulty-green { border-color: #A0C35A; }
+        .border-difficulty-blue { border-color: #4AADEE; }
+        .border-difficulty-purple { border-color: #A16AE8; }
+
+        /* Selected state for word tiles */
+        .word-tile.selected {
+            background-color: #5a67d8; /* Indigo */
+            color: white;
+            transform: scale(1.05);
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+
+        /* Solved group display animation */
+        .solved-group {
+            opacity: 0;
+            transform: scale(0.9);
+            animation: popIn 0.5s ease forwards;
+        }
+
+        @keyframes popIn {
+            to {
+                opacity: 1;
+                transform: scale(1);
+            }
+        }
+
+        /* Shake animation for incorrect guess */
+        @keyframes shake {
+            0%, 100% { transform: translateX(0); }
+            10%, 30%, 50%, 70%, 90% { transform: translateX(-5px); }
+            20%, 40%, 60%, 80% { transform: translateX(5px); }
+        }
+        .shake {
+            animation: shake 0.5s ease-in-out;
+        }
+
+        /* Confetti styles */
+        .confetti {
+            position: absolute;
+            width: 8px;
+            height: 16px;
+            background-color: var(--color);
+            opacity: 0.8;
+            animation: fall 4s linear infinite;
+            border-radius: 2px;
+        }
+
+        @keyframes fall {
+            to {
+                transform: translateY(100vh) rotate(360deg);
+                opacity: 0;
+            }
+        }
+
+        /* Tutorial Overlay */
+        .tutorial-overlay {
+            position: fixed;
+            inset: 0;
+            background-color: rgba(0, 0, 0, 0.7);
+            z-index: 50;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .tutorial-content {
+            background-color: white;
+            padding: 2rem;
+            border-radius: 0.5rem;
+            max-width: 90%;
+            width: 500px;
+            box-shadow: 0 10px 15px rgba(0, 0, 0, 0.1);
+        }
+
+        /* Ensure buttons are visually distinct */
+        .game-button {
+            @apply px-4 py-2 rounded-md font-semibold shadow-md transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2;
+        }
+        .button-primary {
+            @apply game-button bg-blue-600 text-white hover:bg-blue-700 focus:ring-blue-500;
+        }
+        .button-secondary {
+            @apply game-button bg-gray-200 text-gray-700 hover:bg-gray-300 focus:ring-gray-400;
+        }
+        .button-hint {
+            @apply game-button bg-yellow-500 text-white hover:bg-yellow-600 focus:ring-yellow-400 disabled:opacity-50 disabled:cursor-not-allowed;
+        }
+
+        /* Message Area Styling */
+        .message-box {
+            @apply p-3 rounded-md text-center font-medium transition-opacity duration-300;
+        }
+        .message-success {
+            @apply bg-green-100 text-green-800;
+        }
+        .message-error {
+            @apply bg-red-100 text-red-800;
+        }
+        .message-info {
+            @apply bg-blue-100 text-blue-800;
+        }
+
+        /* Responsive grid */
+        .connections-grid {
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+        }
+        @media (max-width: 640px) {
+            .connections-grid {
+                gap: 0.5rem; /* Smaller gap on mobile */
+            }
+            .word-tile {
+                font-size: 0.875rem; /* Smaller text on mobile */
+                padding: 0.5rem;
+                min-height: 60px; /* Adjust height for smaller screens */
+            }
+        }
+    </style>
 </head>
+<body class="bg-gray-100 flex flex-col items-center min-h-screen p-4">
 
-<body>
-  <main>
-    <h1>Vanilla JavaScript App</h1>
-  </main>
+    <div id="intro-screen" class="text-center p-6 bg-white rounded-lg shadow-lg max-w-lg w-full">
+        <h1 class="text-3xl font-bold text-blue-700 mb-4">Microsoft Connections</h1>
+        <p class="text-gray-600 mb-4">Group words that share a common Microsoft theme!</p>
+        <div id="stats-display" class="mb-4 text-sm text-gray-500">Loading stats...</div>
+        <p class="text-gray-600 mb-6">Find 4 groups of 4 words. You have 4 mistakes.</p>
+        <div class="flex justify-center space-x-4">
+            <button id="start-game-button" class="button-primary">Start Game</button>
+            <button id="show-tutorial-button" class="button-secondary">How to Play</button>
+        </div>
+    </div>
+
+    <div id="game-screen" class="hidden w-full max-w-2xl mx-auto flex flex-col items-center">
+        <header class="w-full flex justify-between items-center mb-4">
+            <h1 class="text-2xl font-bold text-blue-700">Microsoft Connections</h1>
+            <button id="new-game-button" class="button-secondary">New Game</button>
+        </header>
+
+        <div class="w-full flex flex-col sm:flex-row justify-between items-center mb-4 space-y-2 sm:space-y-0">
+            <div class="flex items-center space-x-2">
+                <span class="font-medium text-gray-700">Mistakes remaining:</span>
+                <div id="mistakes-counter" class="flex space-x-1.5"></div>
+            </div>
+            <div class="flex items-center space-x-2">
+                 <span class="font-medium text-gray-700">Groups found:</span>
+                 <div id="level-indicator" class="flex space-x-1.5"></div>
+            </div>
+        </div>
+
+         <div class="w-full bg-gray-200 p-2 rounded-md mb-4 text-xs text-center text-gray-700">
+            <span class="font-semibold">Difficulty:</span>
+            <span class="inline-block w-3 h-3 rounded-full bg-difficulty-yellow border border-gray-400 ml-1 mr-0.5"></span>Easy
+            <span class="inline-block w-3 h-3 rounded-full bg-difficulty-green border border-gray-400 ml-1 mr-0.5"></span>Medium
+            <span class="inline-block w-3 h-3 rounded-full bg-difficulty-blue border border-gray-400 ml-1 mr-0.5"></span>Hard
+            <span class="inline-block w-3 h-3 rounded-full bg-difficulty-purple border border-gray-400 ml-1 mr-0.5"></span>Tricky
+        </div>
+
+        <div id="solved-groups-container" class="w-full mb-4 space-y-2"></div>
+
+        <div id="connections-grid" class="grid connections-grid gap-2 w-full mb-4"></div>
+
+        <div id="message-area" class="w-full h-10 mb-4 text-center" aria-live="polite"></div>
+
+        <div class="flex space-x-4">
+            <button id="hint-button" class="button-hint" disabled>
+                <i class="lucide-lightbulb mr-1"></i>Get Hint
+            </button>
+            <button id="submit-button" class="button-primary" disabled>
+                Submit
+            </button>
+             <button id="deselect-all-button" class="button-secondary">
+                Deselect All
+            </button>
+        </div>
+    </div>
+
+    <div id="tutorial-overlay" class="tutorial-overlay hidden">
+        <div class="tutorial-content">
+            <h2 class="text-2xl font-bold mb-4">How to Play Connections</h2>
+            <ul class="list-disc list-inside space-y-2 mb-6 text-gray-700">
+                <li>Find groups of four words that share something in common.</li>
+                <li>Select four words and tap 'Submit'.</li>
+                <li>If you're right, the category will be revealed, and the solved words removed. The grid will rearrange.</li>
+                <li>If you're wrong, you'll lose a mistake point.</li>
+                <li>If you guess 3 out of 4 words in a group, you'll see a "One off..." message.</li>
+                <li>If you repeat an incorrect guess, you'll see "You've already guessed that!" (no penalty).</li>
+                <li>You have 4 mistakes to find all 4 groups.</li>
+                <li>Categories have different difficulty levels (Yellow = Easiest, Purple = Trickiest).</li>
+                <li>After 2 mistakes, you can use the 'Get Hint' button once per game.</li>
+            </ul>
+            <button id="close-tutorial-button" class="button-primary w-full">Got it!</button>
+        </div>
+    </div>
+
+    <div id="confetti-container" class="fixed top-0 left-0 w-full h-full pointer-events-none overflow-hidden z-40"></div>
+
+
+    <script>
+        // --- Game Data ---
+        const puzzles = [
+             // Puzzle 1 (Example from PRD)
+            {
+                id: 1,
+                groups: [
+                    { category: "Microsoft Office Core Applications", words: ["Word", "Excel", "PowerPoint", "Outlook"], level: "yellow" },
+                    { category: "Azure Resource Types", words: ["VM", "Storage", "Database", "App Service"], level: "green" },
+                    { category: "Azure Services (Common Words)", words: ["Cosmos", "Fabric", "Purview", "Sentinel"], level: "blue" },
+                    { category: "Microsoft Products (Physical Concepts)", words: ["Edge", "Surface", "Power", "Dynamics"], level: "purple" }
+                ]
+            },
+            // Puzzle 2 (Azure Focus)
+            {
+                id: 2,
+                groups: [
+                    { category: "Azure Compute Services", words: ["Functions", "Batch", "Kubernetes", "Container Instances"], level: "green" },
+                    { category: "Azure Identity Services", words: ["Entra ID", "B2C", "Domain Services", "Managed Identity"], level: "blue" },
+                    { category: "Azure Regions", words: ["East US", "West Europe", "Southeast Asia", "Brazil South"], level: "yellow" },
+                    { category: "Prefixes for Azure Services", words: ["App", "Data", "Logic", "Machine"], level: "purple" } // App Config, Data Factory, Logic Apps, Machine Learning
+                ]
+            },
+            // Puzzle 3 (M365 Focus)
+            {
+                id: 3,
+                groups: [
+                    { category: "Microsoft Teams Features", words: ["Chat", "Channels", "Meetings", "Files"], level: "yellow" },
+                    { category: "SharePoint Components", words: ["Sites", "Lists", "Libraries", "Web Parts"], level: "green" },
+                    { category: "Microsoft 365 Security Tools", words: ["Defender", "Intune", "Information Protection", "Compliance Center"], level: "blue" },
+                    { category: "Things That Can Be 'Shared'", words: ["Screen", "Calendar", "Mailbox", "Whiteboard"], level: "purple" } // In M365 context
+                ]
+            },
+            // Puzzle 4 (Developer Focus)
+            {
+                id: 4,
+                groups: [
+                    { category: "Programming Languages", words: ["C#", "TypeScript", "Python", "F#"], level: "yellow" },
+                    { category: "Visual Studio Editions", words: ["Community", "Professional", "Enterprise", "Code"], level: "green" },
+                    { category: "Source Control Concepts", words: ["Commit", "Branch", "Merge", "Pull Request"], level: "blue" },
+                    { category: "Words Ending in 'Hub'", words: ["Git", "Dev", "Event", "Io"], level: "purple" } // GitHub, Dev Hub, Event Hub, IoT Hub
+                ]
+            },
+             // Puzzle 5 (Windows Focus)
+            {
+                id: 5,
+                groups: [
+                    { category: "Windows Settings Categories", words: ["System", "Devices", "Network", "Personalization"], level: "yellow" },
+                    { category: "File Explorer Elements", words: ["Ribbon", "Navigation Pane", "Quick Access", "Details Pane"], level: "green" },
+                    { category: "Command Line Tools", words: ["CMD", "PowerShell", "WSL", "Terminal"], level: "blue" },
+                    { category: "Things You Can 'Pin'", words: ["App", "Folder", "Contact", "Website"], level: "purple" } // To Start or Taskbar
+                ]
+            },
+            // Puzzle 6 (General Microsoft)
+            {
+                id: 6,
+                groups: [
+                    { category: "Microsoft Gaming", words: ["Xbox", "Game Pass", "Minecraft", "Flight Simulator"], level: "yellow" },
+                    { category: "Microsoft Browsers (Past & Present)", words: ["Edge", "Internet Explorer", "Spartan", "Trident"], level: "green" }, // Trident was IE engine, Spartan was Edge codename
+                    { category: "Microsoft CEOs", words: ["Gates", "Ballmer", "Nadella", "Allen"], level: "blue" }, // Allen co-founded, wasn't CEO, slight trick
+                    { category: "Microsoft Acronyms", words: ["ASP", "SQL", "DNS", "API"], level: "purple" } // Common tech acronyms used heavily by MS
+                ]
+            },
+             // Puzzle 7 (From Updates - Office Extensions)
+            {
+                id: 7,
+                groups: [
+                    { category: "Word File Extensions", words: ["DOC", "DOCX", "DOT", "DOTX"], level: "yellow" },
+                    { category: "Excel File Extensions", words: ["XLS", "XLSX", "XLT", "XLTX"], level: "green" },
+                    { category: "PowerPoint File Extensions", words: ["PPT", "PPTX", "POT", "POTX"], level: "blue" },
+                    { category: "Image File Extensions (Insertable)", words: ["JPG", "PNG", "GIF", "BMP"], level: "purple" } // Common image types usable in Office
+                ]
+            },
+            // Puzzle 8 (From Updates - Windows Shortcuts)
+            {
+                id: 8,
+                groups: [
+                    { category: "Clipboard Shortcuts", words: ["Ctrl+C", "Ctrl+X", "Ctrl+V", "Ctrl+Z"], level: "yellow" },
+                    { category: "Window Management Shortcuts", words: ["Alt+Tab", "Win+D", "Win+Arrow", "Alt+F4"], level: "green" },
+                    { category: "Text Editing Shortcuts", words: ["Ctrl+A", "Ctrl+B", "Ctrl+I", "Ctrl+S"], level: "blue" },
+                    { category: "Shortcuts Using Function Keys", words: ["F1", "F2", "F5", "F11"], level: "purple" } // Help, Rename, Refresh, Fullscreen
+                ]
+            },
+            // Puzzle 9 (From Updates - Microsoft Hardware)
+            {
+                id: 9,
+                groups: [
+                    { category: "Surface Devices", words: ["Pro", "Laptop", "Go", "Studio"], level: "yellow" },
+                    { category: "Xbox Consoles", words: ["Series X", "Series S", "One", "360"], level: "green" },
+                    { category: "Microsoft Peripherals", words: ["Mouse", "Keyboard", "Webcam", "Headset"], level: "blue" },
+                    { category: "Internal Codenames for Hardware", words: ["Andromeda", "Centaurus", "Scorpio", "Lockhart"], level: "purple" } // Foldable, Dual-screen, Xbox One X, Xbox Series S
+                ]
+            },
+            // Puzzle 10 (From Updates - Strategic Concepts)
+            {
+                id: 10,
+                groups: [
+                    { category: "Cloud Computing Models", words: ["IaaS", "PaaS", "SaaS", "Serverless"], level: "yellow" },
+                    { category: "Microsoft Business Applications", words: ["Dynamics 365", "Power Platform", "Viva", "Loop"], level: "green" },
+                    { category: "AI Concepts", words: ["Copilot", "Machine Learning", "Neural Network", "LLM"], level: "blue" },
+                    { category: "Famous Microsoft Strategy Paradigms", words: ["Embrace", "Extend", "Extinguish", "Mobile First"], level: "purple" } // EEE, Mobile First Cloud First
+                ]
+            },
+             // Puzzle 11 (From Updates - Canceled/Changed Projects)
+            {
+                id: 11,
+                groups: [
+                    { category: "Operating Systems", words: ["Windows", "MS-DOS", "Xenix", "Azure Sphere"], level: "yellow" }, // Azure Sphere is an OS
+                    { category: "Web Browsers Developed by Microsoft", words: ["Edge", "Internet Explorer", "MSN Explorer", "Maxthon"], level: "green" }, // Maxthon used Trident engine
+                    { category: "Microsoft Products with '365' in Name", words: ["Microsoft", "Dynamics", "Defender", "Copilot"], level: "blue" }, // M365, D365, Defender for 365, Copilot for M365
+                    { category: "Ambitious Microsoft Projects (Canceled/Pivoted)", words: ["Courier", "Kin", "Zune", "Band"], level: "purple" }
+                ]
+            },
+            // Puzzle 12 (From Updates - Store/Revolutionary)
+             {
+                id: 12,
+                groups: [
+                    { category: "Microsoft Store App Categories", words: ["Games", "Productivity", "Utilities", "Entertainment"], level: "yellow" },
+                    { category: "Input Methods", words: ["Keyboard", "Mouse", "Touch", "Pen"], level: "green" },
+                    { category: "Windows Versions", words: ["XP", "Vista", "7", "11"], level: "blue" },
+                    { category: "Microsoft Products That Revolutionized Computing", words: ["Excel", "Windows 95", "Azure", "HoloLens"], level: "purple" } // Spreadsheet dominance, GUI standard, Cloud shift, AR attempt
+                ]
+            }
+            // Add more puzzles here following the structure
+        ];
+
+        // --- DOM Elements ---
+        const introScreen = document.getElementById('intro-screen');
+        const gameScreen = document.getElementById('game-screen');
+        const startGameButton = document.getElementById('start-game-button');
+        const newGameButton = document.getElementById('new-game-button');
+        const gridContainer = document.getElementById('connections-grid');
+        const mistakesCounter = document.getElementById('mistakes-counter');
+        const levelIndicator = document.getElementById('level-indicator');
+        const solvedGroupsContainer = document.getElementById('solved-groups-container');
+        const submitButton = document.getElementById('submit-button');
+        const deselectAllButton = document.getElementById('deselect-all-button');
+        const messageArea = document.getElementById('message-area');
+        const hintButton = document.getElementById('hint-button');
+        const confettiContainer = document.getElementById('confetti-container');
+        const tutorialOverlay = document.getElementById('tutorial-overlay');
+        const showTutorialButton = document.getElementById('show-tutorial-button');
+        const closeTutorialButton = document.getElementById('close-tutorial-button');
+        const statsDisplay = document.getElementById('stats-display');
+
+        // --- Game State ---
+        let currentPuzzle = null;
+        let selectedWords = [];
+        let solvedGroups = [];
+        let mistakesRemaining = 4;
+        let totalMistakesMade = 0;
+        let hintUsed = false;
+        let gameState = 'intro'; // intro, playing, won, lost
+        let activeWords = [];
+        let previousIncorrectGuesses = []; // *** NEW: Stores incorrect guesses for current game ***
+        let gameStats = {
+            played: 0,
+            won: 0,
+            totalMistakes: 0,
+            lastPuzzleId: null
+        };
+        const MAX_MISTAKES = 4;
+
+        // --- Storage Handling ---
+        const storageKey = 'microsoftConnectionsStats';
+        const tutorialKey = 'microsoftConnectionsTutorialSeen';
+        let storage = null;
+
+        try {
+            localStorage.setItem('test', 'test');
+            localStorage.removeItem('test');
+            storage = localStorage;
+            console.log("Using localStorage for stats.");
+        } catch (e) {
+            console.warn("localStorage is not available. Using memory storage for stats (will reset on refresh).");
+            storage = (function() {
+                let store = {};
+                return {
+                    getItem: function(key) { return store[key] || null; },
+                    setItem: function(key, value) { store[key] = value.toString(); },
+                    removeItem: function(key) { delete store[key]; },
+                    clear: function() { store = {}; }
+                };
+            })();
+        }
+
+        function loadStats() {
+            const savedStats = storage.getItem(storageKey);
+            if (savedStats) {
+                try {
+                    gameStats = JSON.parse(savedStats);
+                    if (typeof gameStats.played !== 'number' || typeof gameStats.won !== 'number' || typeof gameStats.totalMistakes !== 'number') {
+                       throw new Error("Invalid stats format");
+                    }
+                } catch (e) {
+                    console.error("Failed to parse stats, resetting.", e);
+                    gameStats = { played: 0, won: 0, totalMistakes: 0, lastPuzzleId: null };
+                    storage.removeItem(storageKey);
+                }
+            }
+            displayStats();
+        }
+
+        function saveStats() {
+            try {
+                 storage.setItem(storageKey, JSON.stringify(gameStats));
+            } catch (e) {
+                console.error("Failed to save stats.", e);
+            }
+            displayStats();
+        }
+
+        function displayStats() {
+             const winRate = gameStats.played > 0 ? ((gameStats.won / gameStats.played) * 100).toFixed(0) : 0;
+             const avgMistakes = gameStats.played > 0 ? (gameStats.totalMistakes / gameStats.played).toFixed(1) : 0;
+             statsDisplay.innerHTML = `
+                Games Played: ${gameStats.played} | Wins: ${gameStats.won} (${winRate}%) | Avg. Mistakes: ${avgMistakes}
+             `;
+        }
+
+        function hasSeenTutorial() {
+            return storage.getItem(tutorialKey) === 'true';
+        }
+
+        function markTutorialSeen() {
+             try {
+                 storage.setItem(tutorialKey, 'true');
+             } catch (e) {
+                 console.error("Failed to mark tutorial as seen.", e);
+             }
+        }
+
+        // --- Utility Functions ---
+        function shuffleArray(array) {
+            for (let i = array.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [array[i], array[j]] = [array[j], array[i]];
+            }
+            return array;
+        }
+
+        // *** NEW: Helper to create a consistent key for guess storage/checking ***
+        function getGuessKey(words) {
+            return words.slice().sort().join(','); // Sort words alphabetically and join
+        }
+
+
+        function getDifficultyClass(level) {
+            return `bg-difficulty-${level}`;
+        }
+
+        function getDifficultyBorderClass(level) {
+             return `border-difficulty-${level}`;
+        }
+
+        // --- Game Logic Functions ---
+
+        function selectPuzzle() {
+            const availablePuzzles = puzzles.filter(p => p.id !== gameStats.lastPuzzleId);
+            const pool = availablePuzzles.length > 0 ? availablePuzzles : puzzles;
+            const randomIndex = Math.floor(Math.random() * pool.length);
+            return pool[randomIndex];
+        }
+
+        function renderGrid(wordsToRender) {
+            gridContainer.innerHTML = '';
+            wordsToRender.forEach(word => {
+                const tile = document.createElement('button');
+                tile.classList.add('word-tile', 'p-2', 'rounded-md', 'bg-gray-200', 'hover:bg-gray-300', 'text-gray-800', 'font-medium', 'text-center', 'transition-all', 'duration-150', 'ease-in-out', 'flex', 'items-center', 'justify-center', 'min-h-[70px]', 'text-sm', 'sm:text-base');
+                tile.textContent = word;
+                tile.dataset.word = word;
+                if (selectedWords.includes(word)) {
+                    tile.classList.add('selected');
+                }
+                tile.addEventListener('click', handleWordSelection);
+                gridContainer.appendChild(tile);
+            });
+        }
+
+        function renderMistakes() {
+            mistakesCounter.innerHTML = '';
+            for (let i = 0; i < MAX_MISTAKES; i++) {
+                const dot = document.createElement('span');
+                dot.classList.add('block', 'w-3', 'h-3', 'rounded-full');
+                dot.classList.add(i < mistakesRemaining ? 'bg-blue-500' : 'bg-gray-300');
+                mistakesCounter.appendChild(dot);
+            }
+             hintButton.disabled = hintUsed || totalMistakesMade < 2 || gameState !== 'playing';
+        }
+
+         function renderLevelIndicator() {
+            levelIndicator.innerHTML = '';
+            const totalGroups = currentPuzzle.groups.length;
+            for (let i = 0; i < totalGroups; i++) {
+                const dot = document.createElement('span');
+                dot.classList.add('block', 'w-3', 'h-3', 'rounded-full');
+                 if (i < solvedGroups.length) {
+                     const solvedGroupLevel = solvedGroups[i].level;
+                     dot.classList.add(getDifficultyClass(solvedGroupLevel).replace('bg-', 'border-'), 'border-2');
+                     dot.style.backgroundColor = 'transparent';
+                 } else {
+                    dot.classList.add('bg-gray-300');
+                 }
+                levelIndicator.appendChild(dot);
+            }
+        }
+
+        function handleWordSelection(event) {
+            if (gameState !== 'playing') return;
+            const tile = event.target;
+            const word = tile.dataset.word;
+            const index = selectedWords.indexOf(word);
+            if (index > -1) {
+                selectedWords.splice(index, 1);
+                tile.classList.remove('selected');
+            } else {
+                if (selectedWords.length < 4) {
+                    selectedWords.push(word);
+                    tile.classList.add('selected');
+                }
+            }
+            submitButton.disabled = selectedWords.length !== 4;
+        }
+
+        function deselectAllWords() {
+             selectedWords = [];
+             document.querySelectorAll('.word-tile.selected').forEach(tile => {
+                 tile.classList.remove('selected');
+             });
+             submitButton.disabled = true;
+             clearMessage();
+        }
+
+        // *** UPDATED: Includes check for duplicate incorrect guesses ***
+        function submitGuess() {
+            if (selectedWords.length !== 4 || gameState !== 'playing') return;
+
+            const currentGuessKey = getGuessKey(selectedWords); // Get sorted key for checking
+
+            // *** NEW: Check if this exact incorrect guess was made before ***
+            if (previousIncorrectGuesses.includes(currentGuessKey)) {
+                showMessage("You've already guessed that!", 'info');
+                // Add shake animation even for duplicate incorrect guesses
+                gridContainer.querySelectorAll('.word-tile.selected').forEach(tile => {
+                    tile.classList.add('shake');
+                    tile.addEventListener('animationend', () => tile.classList.remove('shake'), { once: true });
+                });
+                return; // Do not proceed further, don't count mistake
+            }
+
+
+            let correctGroup = null;
+            for (const group of currentPuzzle.groups) {
+                if (solvedGroups.some(sg => sg.category === group.category)) {
+                    continue;
+                }
+                const groupWordsSet = new Set(group.words);
+                const selectedWordsSet = new Set(selectedWords);
+                if (groupWordsSet.size === selectedWordsSet.size && [...groupWordsSet].every(word => selectedWordsSet.has(word))) {
+                    correctGroup = group;
+                    break;
+                }
+            }
+
+            if (correctGroup) {
+                handleCorrectGuess(correctGroup);
+            } else {
+                handleIncorrectGuess(); // Pass the currentGuessKey to store if incorrect
+            }
+        }
+
+        function handleCorrectGuess(group) {
+            solvedGroups.push(group);
+            solvedGroups.sort((a, b) => {
+                 const order = { yellow: 1, green: 2, blue: 3, purple: 4 };
+                 return order[a.level] - order[b.level];
+             });
+            renderSolvedGroups();
+            const wordsInSolvedGroup = group.words;
+            activeWords = activeWords.filter(word => !wordsInSolvedGroup.includes(word));
+            renderGrid(activeWords);
+            renderLevelIndicator();
+            selectedWords = [];
+            submitButton.disabled = true;
+            showMessage(`Correct! Category: ${group.category}`, 'success');
+            if (solvedGroups.length === currentPuzzle.groups.length) {
+                handleWin();
+            }
+        }
+
+        // *** UPDATED: Stores incorrect guess, checks for "One Off" ***
+        function handleIncorrectGuess() {
+            mistakesRemaining--;
+            totalMistakesMade++;
+            renderMistakes(); // Update mistake dots and hint button state
+
+            const currentGuessKey = getGuessKey(selectedWords); // Get key to store
+            // *** NEW: Store this incorrect guess ***
+            previousIncorrectGuesses.push(currentGuessKey);
+
+            // *** NEW: Check for "One Off" ***
+            let isOneOff = false;
+            const unsolvedGroups = currentPuzzle.groups.filter(g => !solvedGroups.some(sg => sg.category === g.category));
+            for (const group of unsolvedGroups) {
+                const groupWordsSet = new Set(group.words);
+                let correctCount = 0;
+                selectedWords.forEach(word => {
+                    if (groupWordsSet.has(word)) {
+                        correctCount++;
+                    }
+                });
+                if (correctCount === 3) {
+                    isOneOff = true;
+                    break; // Found a "one off" match
+                }
+            }
+
+            // Add shake animation
+            gridContainer.querySelectorAll('.word-tile.selected').forEach(tile => {
+                tile.classList.add('shake');
+                tile.addEventListener('animationend', () => tile.classList.remove('shake'), { once: true });
+            });
+
+            // Show appropriate message
+            if (mistakesRemaining > 0) {
+                if (isOneOff) {
+                    showMessage('One off...', 'error');
+                } else {
+                    // Optionally show a generic brief message, or rely on shake/mistake counter
+                     showMessage('Incorrect guess.', 'error'); // Brief message
+                }
+            } else {
+                 // On the last mistake, prioritize the "One off..." message if applicable
+                 if (isOneOff) {
+                     showMessage('One off...', 'error');
+                 } else {
+                     showMessage('Incorrect guess.', 'error'); // Brief message before lose condition
+                 }
+            }
+
+            // Clear selection AFTER showing feedback/animation
+            // Using setTimeout to allow animation to partly play before clearing
+            setTimeout(() => {
+                 deselectAllWords(); // Clear selection
+            }, 300);
+
+
+            // Check for lose condition
+            if (mistakesRemaining === 0) {
+                handleLose();
+            }
+        }
+
+
+         function showHint() {
+            if (hintUsed || totalMistakesMade < 2 || gameState !== 'playing') return;
+            const unsolvedGroups = currentPuzzle.groups.filter(g => !solvedGroups.some(sg => sg.category === g.category));
+            if (unsolvedGroups.length > 0) {
+                const hintGroup = unsolvedGroups[0];
+                showMessage(`Hint: One category is "${hintGroup.category}"`, 'info', false);
+                hintUsed = true;
+                hintButton.disabled = true;
+            }
+        }
+
+        function renderSolvedGroups() {
+            solvedGroupsContainer.innerHTML = '';
+            solvedGroups.forEach(group => {
+                const groupDiv = document.createElement('div');
+                groupDiv.classList.add('solved-group', 'p-4', 'rounded-md', 'text-center', getDifficultyClass(group.level));
+                groupDiv.innerHTML = `
+                    <p class="font-bold text-lg">${group.category}</p>
+                    <p class="text-sm">${group.words.join(', ')}</p>
+                `;
+                solvedGroupsContainer.appendChild(groupDiv);
+            });
+        }
+
+        function handleWin() {
+            gameState = 'won';
+            showMessage('Congratulations! You found all connections!', 'success', false);
+            triggerConfetti();
+            submitButton.disabled = true;
+            hintButton.disabled = true;
+            deselectAllButton.disabled = true;
+            gameStats.won++;
+            gameStats.totalMistakes += (MAX_MISTAKES - mistakesRemaining);
+            saveStats();
+        }
+
+        function handleLose() {
+            gameState = 'lost';
+            setTimeout(() => {
+                showMessage(`Better luck next time! Mistakes remaining: 0`, 'error', false);
+                revealAllAnswers();
+            }, 500); // Delay allows last incorrect message ("One off..." or "Incorrect") to show briefly
+            submitButton.disabled = true;
+            hintButton.disabled = true;
+            deselectAllButton.disabled = true;
+            gameStats.totalMistakes += MAX_MISTAKES;
+            saveStats();
+        }
+
+        function revealAllAnswers() {
+             activeWords.forEach(word => {
+                 const tile = gridContainer.querySelector(`.word-tile[data-word="${word}"]`);
+                 if (tile) {
+                     tile.classList.add('opacity-50', 'pointer-events-none', 'bg-gray-400');
+                     tile.classList.remove('selected', 'hover:bg-gray-300');
+                 }
+             });
+             currentPuzzle.groups.forEach(group => {
+                 if (!solvedGroups.some(sg => sg.category === group.category)) {
+                    const groupDiv = document.createElement('div');
+                    groupDiv.classList.add('solved-group', 'p-4', 'rounded-md', 'text-center', 'opacity-90', 'border-2', getDifficultyBorderClass(group.level), 'bg-gray-100', 'text-gray-700', 'mt-2');
+                    groupDiv.innerHTML = `
+                        <p class="font-bold text-lg">${group.category}</p>
+                        <p class="text-sm">${group.words.join(', ')}</p>
+                    `;
+                    solvedGroupsContainer.appendChild(groupDiv);
+                 }
+             });
+        }
+
+        let messageTimeout;
+        function showMessage(text, type = 'info', autoClear = true) {
+            clearTimeout(messageTimeout);
+            messageArea.textContent = text;
+            messageArea.className = `message-box message-${type} w-full h-auto mb-4 opacity-100`;
+            if (autoClear) {
+                messageTimeout = setTimeout(() => {
+                   clearMessage();
+                }, 3000);
+            }
+        }
+
+         function clearMessage() {
+             if (gameState === 'playing') {
+                messageArea.textContent = '';
+                messageArea.className = 'w-full h-10 mb-4 text-center opacity-0';
+             }
+        }
+
+        function triggerConfetti() {
+            confettiContainer.innerHTML = '';
+            const colors = ['#F9DF6D', '#A0C35A', '#4AADEE', '#A16AE8', '#f87171', '#fbbf24', '#34d399'];
+            for (let i = 0; i < 100; i++) {
+                const confetti = document.createElement('div');
+                confetti.classList.add('confetti');
+                confetti.style.left = `${Math.random() * 100}vw`;
+                confetti.style.animationDelay = `${Math.random() * 2}s`;
+                confetti.style.setProperty('--color', colors[Math.floor(Math.random() * colors.length)]);
+                confetti.style.transform = `rotate(${Math.random() * 360}deg)`;
+                confettiContainer.appendChild(confetti);
+            }
+            setTimeout(() => {
+                 confettiContainer.innerHTML = '';
+            }, 4500);
+        }
+
+        // *** UPDATED: Resets previousIncorrectGuesses ***
+        function startGame() {
+            gameState = 'playing';
+            introScreen.classList.add('hidden');
+            gameScreen.classList.remove('hidden');
+
+            currentPuzzle = selectPuzzle();
+            gameStats.lastPuzzleId = currentPuzzle.id;
+            gameStats.played++;
+            saveStats();
+
+            activeWords = shuffleArray([...currentPuzzle.groups.flatMap(group => group.words)]);
+            previousIncorrectGuesses = []; // *** NEW: Reset previous guesses for new game ***
+
+            selectedWords = [];
+            solvedGroups = [];
+            mistakesRemaining = MAX_MISTAKES;
+            totalMistakesMade = 0;
+            hintUsed = false;
+
+            renderGrid(activeWords);
+            renderMistakes();
+            renderLevelIndicator();
+            solvedGroupsContainer.innerHTML = '';
+            submitButton.disabled = true;
+            hintButton.disabled = true;
+            deselectAllButton.disabled = false;
+            clearMessage();
+            confettiContainer.innerHTML = '';
+        }
+
+        function initGame() {
+            loadStats();
+            if (!hasSeenTutorial()) {
+                tutorialOverlay.classList.remove('hidden');
+            }
+            startGameButton.addEventListener('click', startGame);
+            newGameButton.addEventListener('click', startGame);
+            submitButton.addEventListener('click', submitGuess);
+            deselectAllButton.addEventListener('click', deselectAllWords);
+            hintButton.addEventListener('click', showHint);
+            showTutorialButton.addEventListener('click', () => {
+                tutorialOverlay.classList.remove('hidden');
+            });
+            closeTutorialButton.addEventListener('click', () => {
+                tutorialOverlay.classList.add('hidden');
+                markTutorialSeen();
+            });
+            displayStats();
+        }
+
+        document.addEventListener('DOMContentLoaded', initGame);
+
+    </script>
 </body>
-
 </html>
+
